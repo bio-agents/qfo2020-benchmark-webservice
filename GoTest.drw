@@ -1,0 +1,222 @@
+#
+# A script to measures the similarity between the putative orthologs 
+# based on the code of the benchmark paper.
+#
+#                               Adrian Altenhoff, Sep 2006
+#                  rewritten    Adrian Altenhoff, Jul 13, 2007
+#   rewritten for BenchService  Adrian Altenhoff, Dec 4, 2009
+#   rewritten for EBench        Adrian Altenhoff, Feb 2019
+#
+#  input arguments:
+#     refset_path       path to reference dataset
+#     project_db        path to predictions in darwin db format
+#     title             name of the method which is evaluated
+#     assessment_fname  filename where the assessment file should be written
+#     community_id      community id
+#     measure           similarity measure, e.g 'avg Schlicker'
+#     evidences         evidence codes to consider, passed as a list/set, e.g. [EXP, IDA]
+#     out_dir           directory where output is written to. must exist
+
+printlevel := 2;
+Set(printgc=false); Set(gc=5e6): 
+if not assigned(refset_path) then
+    error('refset_path not assigned');
+fi:
+
+if not assigned(community_id) or not assigned(out_dir) then
+    error('community_id and out_dir all must be defined');
+fi:
+
+existing_evidence_codes := {'EXP','IDA','IPI','IMP','IGI','IEP',  # experiments
+                            'HTP','HDA','HMP','HGI','HEP',        # high throughput
+                            'IBA','IBD','IKR','IRD',              # phylogenetic
+                            'ISS','ISO','ISA','ISM','IGC','RCA',  # computational analysis
+                            'TSA','NSA',                          # Author statement
+                            'IC', 'ND', 'IEA'}:                   # curator / electronic
+
+
+if not type(evidences, {string, list}) then
+    error('evidences not propperly assigned');
+elif type(evidences, string) then
+    if lowercase(evidences) = 'all' then evidences := intersect();
+    elif lowercase(evidences) = 'exp' then 
+        evidences := ['EXP','IDA','IPI','IMP','IGI','IEP'];
+    elif lowercase(evidences) = 'cur' then
+        evidences := [op(minus(existing_evidence_codes, {'ND','IEA'}))];
+    else
+        error('invalid evidence code class: '.evidences);
+    fi:
+fi:
+
+filter := {op(evidences)} intersect existing_evidence_codes;
+if length(filter)=0 then error('no evidences provided that make sense') fi:
+
+# hacky thing to make sure Ontolgy_name is loaded and can be accessed.
+GOname(55):
+allterms := Indices(Ontology_name):
+GOparents := table({}):
+for i in allterms do GOparents[i] := GOsuperclassR(i) od:
+
+DB := GODB := ReadDb(refset_path.'/ServerIndexed.db'):
+lprint('GO annotations from '.GODB['FileName']);
+
+
+# extract important all GO annotations from ServerIndexed.db
+LoadGOset := proc()
+    global DB, freqs, GOs, nProt;
+    nProt := GODB[TotEntries]:
+    GOs := CreateArray(1..nProt,[]):
+    DB := GODB;
+    for eNr to nProt do 
+        gos := SearchTag('GO', Entry(eNr));
+        if gos='' then next fi;
+        gos := SearchDelim('; ',gos);
+        gos := [seq(SearchDelim('@',z), z=gos)];
+
+        for z in gos do 
+            annotation := parse(z[2]);
+            evidence := {seq( x[1], x=annotation)};
+            if length( intersect(evidence, filter) )>0 then
+                GOs[eNr] := append(GOs[eNr], parse(z[1,4..-1]) );
+            fi;
+        od:
+    od:
+
+    # compute GO term frequencies of proteins in iSet;
+    freqs := table(0); cnts := 0;
+    for p in GOs do for go in p do
+        cnts := cnts+1;
+        freqs[go] := freqs[go]+1;
+        for parent in GOparents[go] do freqs[parent] := freqs[parent]+1; od:
+    od od:
+    if cnts>0 then for i in Indices(freqs) do freqs[i] := freqs[i]/cnts od fi:
+end:
+
+
+ComputeSimilarity := proc(data:list; 'method'=(method:string))
+    if method='avg Sim' then
+        return( avg(seq(z[2],z=data)) );
+    elif method='max Sim' then 
+        return( max(seq(z[2],z=data)) );
+    elif method='avg Info' then
+        return( avg(seq(z[3], z=data)) );
+    elif method='max Info' then
+        return( max(seq(z[3], z=data)) );
+    elif method='avg Schlicker' then
+        max1 := CreateArray(1..max(seq(z[4],z=data)),1..2,-DBL_MAX);
+        max2 := CreateArray(1..max(seq(z[5],z=data)),1..2,-DBL_MAX);
+        for i to length(data) do
+             z := data[i];
+             if z[2] > max1[z[4],1] then max1[z[4]] := [z[2],i]; fi; 
+             if z[2] > max2[z[5],1] then max2[z[5]] := [z[2],i]; fi; 
+        od:
+        s := c := 0;
+        for i in [op(max1),op(max2)] do
+            if i[1]>-DBL_MAX then s := s+i[1]; c:=c+1; fi:
+        od:
+        return( s/c );
+    else error('similarity not implemented') fi:
+end:
+
+ComputePerformance := proc(prjDB, title)
+    global DB;
+    # measure similarities between putative orthologs
+    Sim := Stat(title);
+    onts := [3674, 5575, 8150]:
+    rawData := []:
+    DB := prjDB;
+    last_timereport := time():
+    for eNr to nProt do 
+        if length(GOs[eNr]) > 0 then
+            vps := ParseLongList(SearchTag('VP', Entry(eNr)));
+            for vp in vps do 
+                if vp<eNr then next fi: # uni-directional
+                if length(GOs[vp]) = 0 then next fi:
+
+                pairs := [];
+                for ig1 to length(GOs[eNr]) do for ig2 to length(GOs[vp]) do
+                    go1 := GOs[eNr,ig1]; go2 := GOs[vp,ig2];
+                    ic := intersect( {go1, op(GOparents[go1])},
+                                     {go2, op(GOparents[go2])} );
+                    if length(ic)=0 then next fi: # skip if not same ontology
+
+                    ont := sum(SearchArray(z, onts), z=ic); # get ontology
+                    if ont<1 or ont>3 then next fi:
+
+                     #                     2*ln(prob(interClass[eNr]))
+                     # similarity   sim = ---------------------------
+                     #                    ln(prob(go1))+ln(prob(go2))
+                    simRun := infoRun := -DBL_MAX;
+                    for int in ic do
+                        info := -2*ln(freqs[int]);
+                        sim  := If(info=0, 0, -info/(ln(freqs[go1])+ln(freqs[go2])));
+                        if info > infoRun then infoRun := info; infoInt := int fi;
+                        if sim  > simRun  then simRun := sim; simInt := int fi;
+                    od:
+                    pairs := append(pairs, [ont, simRun, infoRun, ig1, ig2] );
+                od od:
+                if length(pairs)>0 then
+                    simPair := ComputeSimilarity(pairs, 'method'=measure);
+                    Sim + simPair;
+                    rawData := append(rawData, [eNr, vp, simPair]);
+                fi:
+            od:
+        fi;
+        if time() - last_timereport > 10 then
+            t := eNr/nProt;
+            printf('%.0f%% done. Estimated remaining time: %.0fsec\n', 100*t, (1-t)/t*time());
+            last_timereport := time();
+        fi:
+    od:
+    return(Sim, rawData):
+end:
+
+StoreRawData := proc(rawData, name, fname_)
+    fname := fname_;
+    if length(fname) > 4 and fname[-3..-1] = '.gz' then
+        fname := fname[1..-4];
+        do_gzip := true;
+    else do_gzip := false fi:
+
+    OpenWriting(fname);
+    printf('# GO Similarities between orthologs from %s\n', name);
+    printf('# Computing timestamp: %s\n', date());
+    printf('# Protein ID 1<tab>Protein ID 2<tab>GO Similarity\n');
+    for z in rawData do
+        id1 := ENr2XRef(z[1]);
+        id2 := ENr2XRef(z[2]);
+        printf('%s\t%s\t%f\n', id1, id2, z[3]);
+    od:
+    OpenWriting(previous);
+    if do_gzip then  CallSystem('gzip -9f '.fname); fi:
+end:
+
+
+StoreResult := proc(fn:string, data)
+    OpenWriting(fn): prints(json(data)): OpenWriting(previous);
+end:
+
+projDB := ReadDb(project_db);
+title_id := ReplaceString(' ','-', ReplaceString('_', '-', title));
+raw_out_fn := sprintf('GO_%s_%s_raw.txt.gz', title_id, sha2(string([filter, measure, title, project_db]))[1..12]);
+LoadGOset():
+printf('loaded %d go annotations\n', sum(length(z), z=GOs));
+result := table():
+result['evidences'] := filter;
+result['measure'] := measure;
+t := ComputePerformance(projDB, title):
+perf := t[1]; raw_data := t[2];
+result['nr_orthologs'] := perf['Number'];
+result['similarity'] := perf['Mean'];
+result['stderr'] := perf['StdErr'];
+result['raw_data_fn'] := raw_out_fn:
+
+
+assessments := [AssessmentDataset(community_id, 'GO', title, 'NR_ORTHOLOGS', perf['Number'], 0),
+                AssessmentDataset(community_id, 'GO', title, measure, perf['Mean'], perf['StdErr'])];
+
+StoreRawData(raw_data, title, out_dir.'/'.result['raw_data_fn']):
+StoreResult(assessment_fname, assessments);
+
+done;
+

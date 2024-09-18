@@ -1,0 +1,10 @@
+work
+.nextflow*
+.idea
+.git
+refset_data
+example
+generators_public
+debugagents
+docs
+reference_data

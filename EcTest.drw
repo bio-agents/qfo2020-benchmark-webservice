@@ -1,0 +1,192 @@
+# 
+# A script to measures the similarity between the putative orthologs 
+# based on the code of the benchmark paper.
+#
+#                               Adrian Altenhoff, Sept 2006
+#                  rewritten    Adrian Altenhoff, July 13, 2007
+#   rewritten for BenchService  Adrian Altenhoff, Dec 4, 2009
+#   rewritten for EBench        Adrian Altenhoff, Mar 2019
+#
+#  input arguments:
+#     refset_path       path to reference dataset
+#     project_db        path to predictions in darwin db format
+#     title             name of the method which is evaluated
+#     assessment_fname  filename where the assessment should be written
+#     community_id      community id
+#     measure           similarity measure, e.g 'avg Schlicker'
+#     out_dir           directory where output is written to. must exist
+
+
+
+printlevel := 2;
+Set(printgc=false); Set(gc=5e6):
+if not assigned(refset_path) then
+    error('refset_path not assigned');
+fi:
+
+if not assigned(community_id) or not assigned(out_dir) then
+    error('community_id and out_dir all must be defined');
+fi:
+
+ReadProgram(refset_path.'/enzymes.drw'); # assigns EC
+
+# get the superclasses for a given EC including the empty class -> any Enzyme.
+ECsuperclassR := proc( c:string )
+    i := SearchAllString('.', c):
+    return( ['', seq(c[1..z-1], z=i), c] );
+end:
+
+LoadECFreqs := proc()
+    t := []:
+    for eNr to length(EC) do
+        if EC[eNr]<>0 then for x in EC[eNr] do 
+            t := append(t, op(ECsuperclassR(x)) ):
+        od fi;
+    od:
+    freqs := transpose( [seq([z,0], z=[op({op(t)})] )] ):
+
+    cnts := 0;
+    for eNr to length(EC) do
+        if EC[eNr]<>0 then for x in EC[eNr] do 
+            for term in ECsuperclassR(x) do
+                k := SearchOrderedArray(term, freqs[1]):
+                assert(freqs[1,k]=term);
+                freqs[2,k] := freqs[2,k] + 1;
+            od:
+            cnts := cnts + 1;
+        od fi:
+    od:
+    if cnts>0 then freqs[2] := freqs[2] / cnts fi:
+    return(freqs);
+end:
+
+
+ComputeSimilarity := proc(data:list; 'method'=(method:string))
+    if method='avg Sim' then
+        return( avg(seq(z[2],z=data)) );
+    elif method='max Sim' then 
+        return( max(seq(z[2],z=data)) );
+    elif method='avg Info' then
+        return( avg(seq(z[3], z=data)) );
+    elif method='max Info' then
+        return( max(seq(z[3], z=data)) );
+    elif method='avg Schlicker' then
+        max1 := CreateArray(1..max(seq(z[4],z=data)),1..2,-DBL_MAX);
+        max2 := CreateArray(1..max(seq(z[5],z=data)),1..2,-DBL_MAX);
+        for i to length(data) do
+             z := data[i];
+             if z[2] > max1[z[4],1] then max1[z[4]] := [z[2],i]; fi; 
+             if z[2] > max2[z[5],1] then max2[z[5]] := [z[2],i]; fi; 
+        od:
+        s := c := 0;
+        for i in [op(max1),op(max2)] do
+            if i[1]>-DBL_MAX then s := s+i[1]; c:=c+1; fi:
+        od:
+        return( s/c );
+    else error('similarity not implemented') fi:
+end:
+
+# Lookup Function to get the OccurenceFreqencey of a given EC term
+GetFreq := proc(ec:string)
+    k := SearchOrderedArray(ec,freqs[1]);
+    assert(k>0 and k<=length(freqs[1]) and freqs[1,k]=ec);
+    return( freqs[2,k] );
+end:
+
+# measure similarities between putative orthologs
+ComputePerformance := proc(prjDB, title)
+    global DB;
+    Sim := Stat(title);
+    nProt := length(EC);
+    assert(nProt = prjDB['TotEntries']);
+    rawData := []:
+    DB := prjDB;
+    last_timereport := time():
+    for eNr to nProt do 
+        if EC[eNr]<>0 then
+            vps := ParseLongList(SearchTag('VP', Entry(eNr)));
+            for vp in vps do 
+                if vp<eNr then next fi: # uni-directional
+                if EC[vp]=0 then next fi: # ortholog has no EC tag
+
+                pairs := [];
+                for ig1 to length(EC[eNr]) do for ig2 to length(EC[vp]) do
+                    ec1 := EC[eNr,ig1]; fec1 := GetFreq(ec1); 
+                    ec2 := EC[vp,ig2];  fec2 := GetFreq(ec2); 
+                    ic := intersect( {op(ECsuperclassR(ec1))}, {op(ECsuperclassR(ec2))} );
+                     #                     2*ln(prob(interClass[i]))
+                     # similarity   sim = ---------------------------
+                     #                    ln(prob(go1))+ln(prob(go2))
+                    simRun := infoRun := -DBL_MAX;
+                    for int in ic do
+                        info := -2*ln(GetFreq(int));
+                        sim  := If(info=0, 0, -info/(ln(fec1)+ln(fec2)));
+                        if info > infoRun then infoRun := info; infoInt := int fi;
+                        if sim  > simRun  then simRun := sim; simInt := int fi;
+                    od:
+                    pairs := append(pairs, [1, simRun, infoRun, ig1, ig2] );
+                od od:
+                if length(pairs)>0 then
+                    simPair :=  ComputeSimilarity(pairs, 'method'=measure);
+                    Sim + simPair;
+                    rawData := append(rawData, [eNr, vp, simPair]);
+                fi:
+            od:
+        fi;
+        if time() - last_timereport > 10 then 
+            t := eNr / nProt;
+            printf('%.0f%% done. Estimated remaining time: %.0fsec\n', 100*t, (1-t)/t*time());
+            last_timereport := time();
+        fi:
+    od:
+    return(Sim, rawData);
+end:
+
+StoreRawData := proc(rawData, name, fname_)
+    fname := fname_;
+    if length(fname) > 4 and fname[-3..-1] = '.gz' then
+        fname := fname[1..-4];
+        do_gzip := true;
+    else do_gzip := false fi:
+
+    OpenWriting(fname);
+    printf('# EC Similarities between orthologs from %s\n', name);
+    printf('# Computing timestamp: %s\n', date());
+    printf('# Protein ID 1<tab>Protein ID 2<tab>EC Similarity\n');
+    for z in rawData do
+        id1 := ENr2XRef(z[1]);
+        id2 := ENr2XRef(z[2]);
+        printf('%s\t%s\t%f\n', id1, id2, z[3]);
+    od:
+    OpenWriting(previous);
+    if do_gzip then  CallSystem('gzip -9f '.fname); fi:
+end:
+
+
+StoreResult := proc(fn:string, data)
+    OpenWriting(fn): prints(json(data)): OpenWriting(previous);
+end:
+
+projDB := ReadDb(project_db);
+title_id := ReplaceString(' ','-', ReplaceString('_', '-', title));
+raw_out_fn := sprintf('EC_%s_%s_raw.txt.gz', title_id, sha2(string([measure, title, project_db]))[1..12]);
+freqs := LoadECFreqs():
+printf('loaded %d EC annotations\n', sum(length(z), z=freqs));
+result := table():
+result['measure'] := measure;
+t := ComputePerformance(projDB, title):
+perf := t[1]; raw_data := t[2];
+result['nr_orthologs'] := perf['Number'];
+result['similarity'] := perf['Mean'];
+result['stderr'] := perf['StdErr'];
+result['raw_data_fn'] := raw_out_fn:
+
+
+assessments := [AssessmentDataset(community_id, 'EC', title, 'NR_ORTHOLOGS', perf['Number'], 0),
+                AssessmentDataset(community_id, 'EC', title, measure, perf['Mean'], perf['StdErr'])];
+
+StoreResult(assessment_fname, assessments);
+StoreRawData(raw_data, title, out_dir.'/'.result['raw_data_fn']):
+
+done;
+

@@ -1,0 +1,187 @@
+##
+# A script to compare pairwise orthologs from reference gene trees 
+# with predicted orthologs for benchmarking
+#
+#                               Adrian Altenhoff, Sep 2006
+#                  rewritten    Adrian Altenhoff, Jul 13, 2007
+#   rewritten for BenchService  Adrian Altenhoff, Dec 4, 2009
+#   rewritten for EBench        Adrian Altenhoff, Jun 2019
+#
+#  input arguments:
+#     refset_path       path to reference dataset
+#     project_db        path to predictions in darwin db format
+#     title             name of the method which is evaluated
+#     testset           type of trees, i.e. SwissTrees or TreeFam-A
+#     community_id      community id
+#     assessment_fname  filename where the assessment file should be written
+#     measure           similarity measure, e.g 'avg Schlicker'
+#     out_dir           directory where output is written to. must exist
+#
+printlevel := 3;
+Set(printgc=false):
+if not assigned(refset_path) then
+    error('refset_path not assigned');
+fi:
+
+if not assigned(community_id) or not assigned(assessment_fname) or not assigned(out_dir) then
+    error('community_id, assessment_fname and out_dir all must be defined');
+fi:
+
+#Assigns ReconciledTrees (a table)
+ReadProgram(refset_path.'/ReconciledTrees_'.testset.'.drw');
+cases := [op(Indices(ReconciledTrees))];
+nrCases := length(cases);
+lprint('nr of cases:', nrCases);
+
+ComputePerformance := proc()
+    # false positive and true positive rates.
+    #  - set to 0 to indicate no data
+    #  - set to list [fpr, var(fpr)] once data is stored
+    fpr  := CreateArray(1..nrCases, 0);
+    tpr  := CreateArray(1..nrCases, 0);
+    DUPL := {':D=Y','D=Y','D','DUPLICATION'};
+    SPEC := {':D=N','D=N','S','SPECIATION'};
+    rawData := CreateArray(1..nrCases, []):
+
+    Logger('start computing RefPhyloTest Performance...', 'DEBUG');
+    for cNr to nrCases do
+        rels := ReconciledTrees[cases[cNr],'Relations']:
+        prts := ReconciledTrees[cases[cNr],'MappedProts'];
+        nProt := length(prts);
+        if nProt>5 then 
+	        dups := table({}); specs := table({});
+            for rel in Indices(rels) do 
+                ev := rels[rel];
+                if member(ev,DUPL) then dups[rel[1]] := append(dups[rel[1]], rel[2]);
+                elif member(ev,SPEC) then specs[rel[1]] := append(specs[rel[1]], rel[2]);
+                else warning('ignoring relation: '.string([rel, ev])); fi:
+            od:
+            
+            # iteration over the proteins in current reconciled tree
+            fp := tp := fn := tn := 1;  #uniform prior probability
+
+            raw := []:
+            for eNr1 in prts do
+                vps := ParseLongList(SearchTag('VP',Entry(eNr1)));
+                vps := {op(vps)} intersect prts;
+                    
+                tpp := intersect(vps, specs[eNr1]):
+                tp := tp + length(tpp)/2;
+                raw := append(raw, seq([eNr1, If(z>eNr1, z, NULL), 'TP'], z=tpp) ):
+
+                tnp := minus(dups[eNr1], vps):
+                tn := tn + length(tnp)/2;
+                raw := append(raw, seq([eNr1, If(z>eNr1, z, NULL), 'TN'], z=tnp) ):
+
+                fpp := intersect(vps, dups[eNr1]);
+                fp := fp + length(fpp)/2;
+                raw := append(raw, seq([eNr1, If(z>eNr1, z, NULL), 'FP'], z=fpp) ):
+
+                fnp := minus(specs[eNr1], vps):
+                fn := fn + length(fnp)/2;
+                raw := append(raw, seq([eNr1, If(z>eNr1, z, NULL), 'FN'], z=fnp) ):
+            od:
+
+            # compute the ppv and tpr and their variances
+            p := tp/(tp+fp);   # positive predictive value
+            fpr[cNr] := [p, p*(1-p)/(tp+fp)];
+            p := tp/(tp+fn);   # true positive rate
+            tpr[cNr] := [p, p*(1-p)/(tp+fn)];
+            rawData[cNr] := raw;
+            Logger(sprintf('[RefPhyloTest]: finished evaluating case "%s": (%d proteins)', cases[cNr], nProt), 'INFO');
+        else 
+            Logger(sprintf('[RefPhyloTest]: too few (%d) proteins in %a\n', nProt, cases[cNr]), 'INFO');
+        fi:
+    od:
+    return( [fpr, tpr, rawData] );
+end:
+
+StoreRawData := proc(rawData, name, fname_)
+    fname := fname_;
+    if length(fname) > 4 and fname[-3..-1] = '.gz' then
+        fname := fname[1..-4];
+        do_gzip := true;
+    else do_gzip := false fi:
+
+    OpenWriting(fname);
+    printf('# Dataset<tab>Protein ID 1<tab>Protein ID 2<tab>Correctness (TP:True '.
+        'positive, FP: False positive, TN: True Negative. FN: False Negative)\n');
+    for i to nrCases do
+        pNam := cases[i];
+        for z in rawData[i] do
+            id1 := ENr2XRef(z[1]);
+            id2 := ENr2XRef(z[2]);
+            printf('%s\t%s\t%s\t%s\n', pNam, id1, id2, z[3]);
+        od:
+    od:
+    OpenWriting(previous);
+    if do_gzip then CallSystem('gzip -9f '.fname); fi
+end:
+
+
+StoreResult := proc(fn:string, data)
+    OpenWriting(fn): prints(json(data)): OpenWriting(previous);
+end:
+
+
+DB := projDB := ReadDb(project_db);
+title_id := ReplaceString(' ','-', ReplaceString('_', '-', title));
+raw_out_fn := sprintf('RefPhylo-%s_%s_%s_raw.txt.gz', testset, title_id, sha2(string([testset, title, project_db]))[1..12]);
+result := table():
+result['testset'] := testset:
+result['raw_data_fn'] := raw_out_fn:
+
+perf := ComputePerformance():
+PPV := perf[1]: TPR := perf[2]: raw_data := perf[3]:
+print(TPR);
+
+fams := []:
+assessments := []:
+if nrCases > 1 then
+    for cNr to nrCases do
+        per_fam := table():
+        per_fam['case'] := cases[cNr];
+        recall := table(): precision := table():
+        print(TPR[cNr], TPR[cNr,1], TPR[cNr,2], PPV[cNr]);
+        if TPR[cNr]<>0 then
+            recall['name'] := 'true positive rate';
+            recall['value'] := TPR[cNr, 1];
+            recall['stderr'] := 1.96 * sqrt(TPR[cNr, 2]);
+            precision['name'] := 'positive predictive value rate';
+            precision['value'] := PPV[cNr, 1];
+            precision['stderr'] := 1.96 * sqrt(PPV[cNr, 2]);
+        fi:
+        per_fam['recall_measures'] := [recall];
+        per_fam['precision_measures'] := [precision];
+        fams := append(fams, per_fam);
+        challenge := testset.'-'.cases[cNr];
+        assessments := append(assessments,
+            AssessmentDataset(community_id, challenge, title, 'TPR', TPR[cNr, 1], 1.96 * sqrt(TPR[cNr, 2])),
+            AssessmentDataset(community_id, challenge, title, 'PPV', PPV[cNr, 1], 1.96 * sqrt(PPV[cNr, 2])));
+    od:
+    result['per_case_results'] := fams:
+fi;
+
+recall := table(): precision := table():
+recall['name'] := 'true positive rate';
+precision['name'] := 'positive predictive value rate';
+nr_valid_cases := sum(If(TPR[c]<>0, 1, 0), c=1..nrCases);
+if nr_valid_cases > 0 then
+    precision['value'] := avg(seq(If(PPV[c] <> 0, PPV[c,1], NULL), c=1..nrCases));
+    precision['stderr'] := 1.96*sqrt( sum([seq(If(PPV[c] <> 0, PPV[c,2], NULL), c=1..nrCases)]) ) / nr_valid_cases;
+    recall['value'] := avg(seq(If(TPR[c] <> 0, TPR[c,1], NULL), c=1..nrCases));
+    recall['stderr'] := 1.96*sqrt( sum([seq(If(TPR[c] <> 0, TPR[c,2], NULL), c=1..nrCases)]) ) / nr_valid_cases;
+else
+    recall['value'] := precision['value'] := 0.5;
+    recall['stderr'] := precision['stderr'] := 1;
+fi:
+result['recall_measures'] := [recall];
+result['precision_measures'] := [precision];
+assessments := append(assessments,
+    AssessmentDataset(community_id, testset, title, 'TPR', recall['value'], recall['stderr']),
+    AssessmentDataset(community_id, testset, title, 'PPV', precision['value'], precision['stderr']));
+StoreRawData(raw_data, title, out_dir.'/'.result['raw_data_fn']);
+#StoreResult(out_dir.'/result.json', result);
+StoreResult(assessment_fname, assessments);
+done;
+

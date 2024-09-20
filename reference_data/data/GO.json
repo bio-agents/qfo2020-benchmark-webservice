@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:GO_agg",
-  "challenge_ids": ["GO"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "NR_ORTHOLOGS",
-        "y_axis": "avg Schlicker"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f8ac402370bc597e785e6ea3eeb3a2e177be16d2611b17c83031469980363e46
+size 289

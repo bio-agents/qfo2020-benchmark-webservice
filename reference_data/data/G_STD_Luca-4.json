@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:G_STD_Luca_agg",
-  "challenge_ids": ["G_STD_Luca"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "NR_ORTHOLOGS",
-        "y_axis": "FRAC_INCORRECT_TREES"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:595cc1c9caf47d5911bbad5d5f55ebafd7ddcb49bb64a82b5b1d4b23ad7d4118
+size 313

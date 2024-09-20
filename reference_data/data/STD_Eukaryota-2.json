@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:STD_Eukaryota_agg",
-  "challenge_ids": ["STD_Eukaryota"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "NR_ORTHOLOGS",
-        "y_axis": "RF_DISTANCE"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9c2b1fbbbc3a8c8bba773088b62aa83df29cdd57114e88bcd2dc01ad67dc2867
+size 310

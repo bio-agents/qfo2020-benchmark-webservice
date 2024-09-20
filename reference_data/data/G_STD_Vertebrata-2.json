@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:G_STD_Vertebrata_agg",
-  "challenge_ids": ["G_STD_Vertebrata"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "NR_ORTHOLOGS",
-        "y_axis": "RF_DISTANCE"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d9b6a001d745c1a4f1981cab776d2f8f71c811ca541bd75a55044fc9e2698619
+size 316

@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:SwissTrees_agg",
-  "challenge_ids": ["SwissTrees"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "TPR",
-        "y_axis": "PPV"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:79f1a55aa5e1c951c306cb56ed38f03f16b8b10409f41f28aeb6dabe416c1a4b
+size 286

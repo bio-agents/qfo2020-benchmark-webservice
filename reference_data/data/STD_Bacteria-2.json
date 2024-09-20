@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:STD_Bacteria_agg",
-  "challenge_ids": ["STD_Bacteria"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "NR_ORTHOLOGS",
-        "y_axis": "RF_DISTANCE"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:97a44c1877954c47c8505ab926f8c5d90450d6e4078b7e1184df8fff6de83f8d
+size 308

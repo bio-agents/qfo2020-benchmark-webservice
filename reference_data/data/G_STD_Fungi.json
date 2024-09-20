@@ -1,15 +1,3 @@
-{
-  "_id": "QfO:G_STD_Fungi_agg",
-  "challenge_ids": ["G_STD_Fungi"],
-  "datalink": {
-    "inline_data": {
-      "challenge_participants": [],
-      "visualization": {
-        "type": "2D-plot",
-        "x_axis": "NR_COMPLETED_TREE_SAMPLINGS",
-        "y_axis": "RF_DISTANCE"
-      }
-    }
-  },
-  "type": "aggregation"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fa33a261a226475fa2854d84f0f959ecff09738273cd1a107110981960f0a4b1
+size 320
